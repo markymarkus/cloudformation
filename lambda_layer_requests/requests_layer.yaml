@@ -1,0 +1,42 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Creates Lambda layer for requests module
+### Parameters
+Parameters:
+  OrgID:
+    Type: String
+    Default: ''
+    Description: Organizations ID to share this layer to. If not shared, leave empty.
+  BucketName:
+    Type: String
+    Default: 'my-s3-bucket'
+    Description: Bucket for layer zip file
+  LayerZipName:
+    Type: String
+    Default: 'requests_layer.zip'
+    Description: Layer zip file
+### Conditions
+Conditions:
+  HasOrg: !Not [ !Equals [ !Ref OrgID, '' ]]
+### Resources
+Resources:
+  RequestsLayer:
+    Type: AWS::Lambda::LayerVersion
+    Properties:
+      CompatibleRuntimes:
+        - python3.6
+        - python3.7
+      Content:
+        S3Bucket: !Ref BucketName
+        S3Key: !Ref LayerZipName
+      Description: python3 requests
+      LayerName: requests-layer
+
+  LayerPermission:
+    Condition: HasOrg
+    DependsOn: RequestsLayer
+    Type: AWS::Lambda::LayerVersionPermission
+    Properties:
+      Action: lambda:GetLayerVersion
+      LayerVersionArn: !Ref RequestsLayer
+      OrganizationId: !Ref OrgID
+      Principal: '*'
