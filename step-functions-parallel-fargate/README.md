@@ -6,7 +6,7 @@ Python X-Ray enabled on created Docker image.
 ## Deploy
 1. Create ECR repository
 ```
-aws cloudformation deploy --template-file cfn/ecr.yml --stack-name ecr --capabilities CAPABILITY_IAM
+aws cloudformation deploy --template-file cfn/ecr.yaml --stack-name ecr --capabilities CAPABILITY_IAM
 ```
 
 2. Create Docker image and push to ECR
@@ -26,7 +26,7 @@ cd ..
 3. Create Fargate and Step Functions - resources
 Replace SUBNET_ID with your VPC's subnet id to launch Fargate tasks to.
 ```
-aws cloudformation deploy --template-file cfn/stepfunctions-fargate.yml --stack-name stepfunctions-fargate --parameter-overrides Image=$REPOURI FargateSubnet=SUBNET_ID --capabilities CAPABILITY_NAMED_IAM
+aws cloudformation deploy --template-file cfn/stepfunctions-fargate.yaml --stack-name stepfunctions-fargate --parameter-overrides Image=$REPOURI FargateSubnet=SUBNET_ID --capabilities CAPABILITY_NAMED_IAM
 ```
 
 ## Test
