@@ -1,0 +1,114 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Parameters:
+  TrustedPrincipalArn:
+    Type: String
+    Description: Primcipal that can use ci-role
+Resources:
+  PermissionBoundaryPolicy:
+    Type: 'AWS::IAM::ManagedPolicy'
+    Properties:
+      Description: permissions boundary policy
+      Path: /
+      ManagedPolicyName: ci-permissions-boundary
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Sid: 'devBoundary'
+          Effect: Allow
+          Action:
+            - cloudformation:*
+            - lambda:*
+            - logs:*
+            - s3:*
+          Resource: '*'
+          Condition:
+            StringEquals:
+              aws:RequestedRegion: eu-west-1
+        - Sid: 'iamAllowed'
+          Effect: Allow
+          Action:
+            - iam:List*
+            - iam:Get*          
+            - iam:CreateInstanceProfile
+            - iam:DeleteInstanceProfile
+            - iam:UpdateAssumeRolePolicy
+            - iam:UpdateRoleDescription
+            - iam:DeleteRole
+            - iam:AttachRolePolicy
+            - iam:PutRolePolicy
+            - iam:AddRoleToInstanceProfile
+            - iam:CreatePolicy
+            - iam:PassRole
+            - iam:CreateServiceLinkedRole
+            - iam:DetachRolePolicy
+            - iam:DeleteRolePolicy
+            - iam:UpdateRole
+            - iam:DeleteServiceLinkedRole
+            - iam:RemoveRoleFromInstanceProfile
+          Resource: '*'
+        - Sid: 'protectBoundaryPolicy'
+          Effect: Allow
+          Action:
+            - iam:CreatePolicyVersion
+            - iam:DeletePolicy
+            - iam:DeletePolicyVersion
+            - iam:SetDefaultPolicyVersion
+          NotResource: !Sub 'arn:aws:iam::${AWS::AccountId}:policy/ci-permissions-boundary'
+        - Sid: 'enforcePermissionsBoundary'
+          Effect: Allow
+          Action:
+            - iam:CreateRole
+            - iam:PutRolePermissionsBoundary
+          Resource: '*'
+          Condition:
+            StringEquals:
+              iam:PermissionsBoundary: !Sub 'arn:aws:iam::${AWS::AccountId}:policy/ci-permissions-boundary'              
+
+  DelegatedDeveloperPolicy:
+    DependsOn: PermissionBoundaryPolicy
+    Type: 'AWS::IAM::ManagedPolicy'
+    Properties:
+      Description: policy for ci - usage 
+      Path: /
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Sid: 'deploymentRoleRights'
+          Effect: Allow
+          Action:
+            - iam:*
+            - lambda:*
+            - cloudformation:*
+            - logs:*
+            - s3:*
+            - rds:*
+          Resource: '*'
+
+  CiRole: 
+    Type: AWS::IAM::Role
+    Properties: 
+      AssumeRolePolicyDocument: 
+        Version: '2012-10-17'
+        Statement: 
+          - 
+            Effect: Allow
+            Principal: 
+              AWS: !Ref TrustedPrincipalArn
+            Action: 
+              - 'sts:AssumeRole'
+      Path: '/'
+      ManagedPolicyArns:
+        - !Ref DelegatedDeveloperPolicy
+      PermissionsBoundary: !Ref PermissionBoundaryPolicy
+
+Outputs:
+  CiRoleArn:
+    Description: This IAM Role is used for Cloudformation deploy pipelines 
+    Value: !GetAtt CiRole.Arn
+    Export:
+      Name: ci-role-arn
+  PermissionsBoundary:
+    Description: This permissions boundary MUST be added to all IAM Roles 
+    Value: !Ref PermissionBoundaryPolicy
+    Export:
+      Name: ci-permissions-boundary
