@@ -1,0 +1,11 @@
+---
+##
+# Resources
+Resources:
+    Repo: 
+        Type: AWS::ECR::Repository
+##
+# Outputs
+Outputs:
+  Uri:
+    Value: !GetAtt Repo.RepositoryUri

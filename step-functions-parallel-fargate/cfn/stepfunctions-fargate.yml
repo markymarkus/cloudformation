@@ -1,0 +1,194 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Step Functions with parallel Fargate tasks
+##
+# Parameters
+Parameters:
+  ServiceName:
+    Type: String
+    Default: MyService
+  FargateSubnet:
+    Type: String
+    Description: Subnet Id to launch Fargate tasks to.
+    Default: ''
+  Image:
+    Type: String
+    Default: ACCOUNT_ID.dkr.ecr.eu-west-1.amazonaws.com/ecr-repo-repo-123123123:latest
+  EnableXRaySf:
+    Type: String
+    Default: False
+    AllowedValues:
+      - True
+      - False
+##
+# Resources
+Resources:
+# Fargate
+  Cluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Join ['', [!Ref ServiceName, Cluster]]
+
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    DependsOn: LogGroup
+    Properties:
+      Family: !Join ['', [!Ref ServiceName, TaskDefinition]]
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      Cpu: 256
+      Memory: 0.5GB
+      ExecutionRoleArn: !Ref ExecutionRole
+      TaskRoleArn: !Ref TaskRole
+      ContainerDefinitions:
+        - Name: !Join ['',[!Ref ServiceName,'-service']]
+          Image: !Ref Image
+          Environment:
+            - Name: AWS_XRAY_DAEMON_ADDRESS
+              Value: '0.0.0.0:2000'
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-region: !Ref AWS::Region
+              awslogs-group: !Ref LogGroup
+              awslogs-stream-prefix: ecs
+        - Name: !Join ['',[!Ref ServiceName,'-xray-daemon']]
+          Image: 'amazon/aws-xray-daemon'
+          MemoryReservation: 256
+          PortMappings:
+            - ContainerPort: 2000
+              Protocol: udp
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-region: !Ref AWS::Region
+              awslogs-group: !Ref LogGroup
+              awslogs-stream-prefix: xray
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Join ['', [/ecs/, !Ref ServiceName, TaskDefinition]]
+
+  ExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy'
+
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Join ['', [!Ref ServiceName, TaskRole]]
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy'
+        - 'arn:aws:iam::aws:policy/AWSXrayWriteOnlyAccess'
+
+# Step Functions
+  StateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    DependsOn: TaskDefinition
+    Properties:
+      DefinitionString: !Sub 
+        - |
+          {
+            "Comment": "Amazon States Language to manage Fargate Tasks",
+            "StartAt": "first",
+            "States": {
+              "first": {
+                "Type": "Pass",
+                "Next": "handleData"
+              },
+              "handleData": {
+                "Type": "Map",
+                "ItemsPath": "$.productid_list",
+                "MaxConcurrency": 6,
+                "Iterator": {
+                  "StartAt": "iterhandle",
+                  "States": {
+                    "iterhandle": {
+                      "Type": "Task",
+                      "Resource": "arn:aws:states:::ecs:runTask.sync",
+                      "Parameters": {
+                        "LaunchType": "FARGATE",
+                        "Cluster": "${ClusterArn}",
+                        "TaskDefinition": "${TaskDefinitionArn}",
+                        "Overrides": {
+                          "ContainerOverrides": [
+                            {
+                              "Name": "${ContainerName}",
+                              "Environment": [
+                                {
+                                  "Name": "INPUTVAR",
+                                  "Value.$": "$.productid"
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        "NetworkConfiguration": {
+                          "AwsvpcConfiguration": {
+                            "Subnets": ["${Subnet}"],
+                            "AssignPublicIp": "ENABLED"
+                          }
+                        }
+                      },
+                      "End": true
+                    }
+                  }
+                },
+              "End": true
+              }
+            }
+          }
+        - ClusterArn: !GetAtt Cluster.Arn
+          TaskDefinitionArn: !Ref TaskDefinition
+          ContainerName: !Join ['',[!Ref ServiceName,'-service']]
+          Subnet: !Ref FargateSubnet
+          
+      RoleArn: !GetAtt SfRole.Arn
+      TracingConfiguration:
+        Enabled: !Ref EnableXRaySf
+
+  SfRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: states.amazonaws.com
+          Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/AWSXrayWriteOnlyAccess'
+      Policies:
+      - PolicyName: lambda
+        PolicyDocument:
+          Statement:
+          - Effect: Allow
+            Action:
+              - "ecs:RunTask"
+              - "ecs:StopTask"
+              - "ecs:DescribeTasks"
+              - "iam:PassRole"
+            Resource: '*'
+          - Effect: Allow
+            Action:
+            - events:PutTargets
+            - events:PutRule
+            - events:DescribeRule
+            Resource: 
+            - !Sub "arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/StepFunctionsGetEventsForECSTaskRule"
