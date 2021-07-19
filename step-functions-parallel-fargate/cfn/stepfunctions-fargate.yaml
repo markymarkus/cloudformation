@@ -30,16 +30,15 @@ Resources:
 
   TaskDefinition:
     Type: AWS::ECS::TaskDefinition
-    DependsOn: LogGroup
     Properties:
       Family: !Join ['', [!Ref ServiceName, TaskDefinition]]
       NetworkMode: awsvpc
       RequiresCompatibilities:
         - FARGATE
-      Cpu: 256
-      Memory: 0.5GB
-      ExecutionRoleArn: !Ref ExecutionRole
-      TaskRoleArn: !Ref TaskRole
+      Cpu: '256'
+      Memory: '0.5GB'
+      ExecutionRoleArn: !GetAtt ExecutionRole.Arn
+      TaskRoleArn: !GetAtt TaskRole.Arn
       ContainerDefinitions:
         - Name: !Join ['',[!Ref ServiceName,'-service']]
           Image: !Ref Image
@@ -99,7 +98,6 @@ Resources:
 # Step Functions
   StateMachine:
     Type: AWS::StepFunctions::StateMachine
-    DependsOn: TaskDefinition
     Properties:
       DefinitionString: !Sub 
         - |
