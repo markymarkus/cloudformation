@@ -33,7 +33,6 @@ Resources:
 
   LayerPermission:
     Condition: HasOrg
-    DependsOn: RequestsLayer
     Type: AWS::Lambda::LayerVersionPermission
     Properties:
       Action: lambda:GetLayerVersion
