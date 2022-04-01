@@ -1,0 +1,53 @@
+---
+###
+## Parameters
+Parameters:
+  GithubThumbprint:
+    Type: String 
+    Default: 6938fd4d98bab03faadb97b34396831e3780aea1
+    Description: Github thumbprint, sha1 of public certificate
+  GithubRepoName:
+    Type: String 
+    Description: Github username/repo
+###
+## Resources
+Resources:
+  IDCProvider:
+      Type: AWS::IAM::OIDCProvider
+      Properties:
+          Url: 'https://token.actions.githubusercontent.com'
+          ClientIdList:
+            - 'sts.amazonaws.com'
+          ThumbprintList:
+             - !Ref GithubThumbprint
+
+  GitHubDeployRole:
+      Type: AWS::IAM::Role
+      Properties:
+          Path: '/'
+          AssumeRolePolicyDocument:
+             Statement:
+               - Effect: Allow
+                 Action: sts:AssumeRoleWithWebIdentity
+                 Principal:
+                   Federated: !Ref IDCProvider
+                 Condition:
+                   StringLike:
+                     token.actions.githubusercontent.com:sub: !Sub repo:${GithubRepoName}:*
+          MaxSessionDuration: 3600
+          Description: 'github deploy role'
+          Policies:
+          - PolicyName: 'deploy'
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+              - Effect: Allow
+                Action:
+                - 's3:ListBucket'
+                Resource: '*'     
+###
+## Outputs
+Outputs:
+  GitHubDeployRoleArn:
+    Description: Github deployment role. Configure to Github secrets.
+    Value: !GetAtt GitHubDeployRole.Arn
