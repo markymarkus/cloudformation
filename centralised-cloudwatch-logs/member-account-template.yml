@@ -1,0 +1,42 @@
+---
+Description: Subscripes logs from param:LogGroupName to param:DestinationArn
+###
+## Parameters
+Parameters:
+  DestinationArn:
+    Type: String
+    Default: 'arn:aws:logs:eu-west-1:ACCOUNT_ID:destination:OrgApplicationLogs'
+  LogGroupName:
+    Type: String
+    Default: '/var/log/messages'
+###
+## Resources
+Resources:
+  LogGroupSubscription:
+    Type: AWS::Logs::SubscriptionFilter
+    Properties:
+      DestinationArn: !Ref DestinationArn
+      FilterPattern: ''
+      LogGroupName: !Ref LogGroupName
+      RoleArn: !GetAtt LogsRole.Arn
+
+  LogsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: !Sub 'logs.${AWS::Region}.amazonaws.com'
+      Path: /
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'logs:PutLogEvents'
+                Resource: '*'

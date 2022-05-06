@@ -1,0 +1,249 @@
+---
+Description: Centralized log delivery stream + S3 bucket
+###
+## Parameters
+Parameters:
+  LogBucketName:
+    Type: String
+    Description: Name of the bucket to store logs
+  OrganizationId:
+    Type: String
+    Description: Members of org are allowed to send logs
+    Default: "o-xxxxxxxxx"
+  DestinationName:
+    Type: String
+    Description: Cloudwatch Logs Destination name 
+    Default: "OrgApplicationLogs"
+###
+## Resources
+Resources:
+  IngestionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: !Sub 'logs.${AWS::Region}.amazonaws.com'
+      Path: /
+
+  IngestionRolePolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Join ['', [!Ref 'AWS::StackName', '-logpolicy']]
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: KinesisWrite
+            Action:
+              - kinesis:PutRecord
+            Effect: Allow
+            Resource: !GetAtt KinesisStream.Arn
+          - Sid: Passrole
+            Action:
+              - iam:PassRole
+            Effect: Allow
+            Resource: !GetAtt IngestionRole.Arn
+      Roles: 
+        - !Ref IngestionRole
+
+  LogBucket:
+    Type: AWS::S3::Bucket
+    Properties: 
+      BucketName: !Ref LogBucketName
+      PublicAccessBlockConfiguration:
+        BlockPublicPolicy: True
+        BlockPublicAcls: True
+        IgnorePublicAcls: True
+        RestrictPublicBuckets: True
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  LogBucketPolicy:
+    Type: AWS::S3::BucketPolicy 
+    DependsOn: LogBucket
+    Properties:
+    Properties:
+      Bucket: !Ref LogBucket
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Action:
+            - S3:PutObject
+            Effect: Allow
+            Resource: !Sub 'arn:aws:s3:::${LogBucketName}/*'
+            Principal:
+              AWS: !GetAtt IngestionRole.Arn
+            Condition:
+              Bool:
+                aws:SecureTransport: True
+
+  LogDestination:
+    Type: AWS::Logs::Destination
+    DependsOn: 
+      - KinesisStream
+      - IngestionRole
+      - IngestionRolePolicy
+    Properties: 
+      DestinationName: !Ref DestinationName
+      DestinationPolicy: 
+        !Join
+          - ''
+          - - '{'
+            - '    "Version" : "2012-10-17",'
+            - '    "Statement" : ['
+            - '      {'
+            - '        "Sid" : "",'
+            - '        "Effect" : "Allow",'
+            - '        "Principal" : "*",'
+            - '        "Action" : "logs:PutSubscriptionFilter",'
+            - !Sub '        "Resource" : "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:destination:${DestinationName}",'
+            - '          "Condition": {'
+            - '             "StringEquals" : {'
+            - !Sub '                "aws:PrincipalOrgID" : ["${OrganizationId}"]'
+            - '               }'
+            - '       }'            
+            - '      }'
+            - '    ]'
+            - '  }'
+      RoleArn: !GetAtt IngestionRole.Arn
+      TargetArn: !GetAtt KinesisStream.Arn
+
+  KinesisStream:
+    Type: AWS::Kinesis::Stream
+    Properties: 
+      ShardCount: 1
+
+  Firehose:
+    Type: AWS::KinesisFirehose::DeliveryStream
+    Properties:
+      DeliveryStreamType: KinesisStreamAsSource
+      KinesisStreamSourceConfiguration:
+        KinesisStreamARN: !GetAtt KinesisStream.Arn
+        RoleARN: !GetAtt FirehoseRole.Arn
+      ExtendedS3DestinationConfiguration: 
+        BucketARN: !GetAtt LogBucket.Arn
+        BufferingHints:
+          IntervalInSeconds: '120'        
+          SizeInMBs: '4'
+        CompressionFormat: GZIP
+        Prefix: 'logs/year=!{timestamp:YYYY}/month=!{timestamp:MM}/day=!{timestamp:dd}/'
+        ErrorOutputPrefix: 'error/!{firehose:error-output-type}/year=!{timestamp:YYYY}/month=!{timestamp:MM}/day=!{timestamp:dd}/'
+        RoleARN: !GetAtt FirehoseRole.Arn
+        ProcessingConfiguration:
+          Enabled: 'true'
+          Processors:
+            - Parameters:
+                - ParameterName: LambdaArn
+                  ParameterValue: !GetAtt TransformationFunction.Arn
+              Type: Lambda
+
+  FirehoseRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: ''
+            Effect: Allow
+            Principal:
+              Service: firehose.amazonaws.com
+            Action: 'sts:AssumeRole'
+            Condition:
+              StringEquals:
+                'sts:ExternalId': !Ref 'AWS::AccountId'
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 's3:AbortMultipartUpload'
+                  - 's3:GetBucketLocation'
+                  - 's3:GetObject'
+                  - 's3:ListBucket'
+                  - 's3:ListBucketMultipartUploads'
+                  - 's3:PutObject'
+                Resource:
+                  - !Join ['',['arn:aws:s3:::', !Ref LogBucketName]]
+                  - !Join ['',['arn:aws:s3:::', !Ref LogBucketName,'/*']]
+              - Effect: Allow
+                Action:
+                  - 'kinesis:DescribeStream'
+                  - 'kinesis:GetShardIterator'
+                  - 'kinesis:GetRecords'
+                Resource: !GetAtt KinesisStream.Arn
+              - Effect: Allow
+                Action:
+                  - 'lambda:InvokeFunction'
+                  - 'lambda:GetFunctionConfiguration'
+                Resource: !GetAtt TransformationFunction.Arn
+
+### Tranformation Lambda
+  TransformationRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Path: /
+      Policies:
+        - PolicyName: firehoseCloudWatchDataProcessing
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource: 'arn:aws:logs:*:*:*'
+
+  TransformationFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: index.lambda_handler
+      Role: !GetAtt TransformationRole.Arn
+      Description: one json per line
+      Code:
+          ZipFile: |
+            import base64
+            import gzip
+            from io import BytesIO
+
+            def lambda_handler(event, context):
+                output = []
+                for record in event['records']:
+                    payload = base64.b64decode(record['data'])
+                    striodata = BytesIO(payload)
+                    with gzip.GzipFile(fileobj=striodata, mode='r') as f:
+                        payload = f.read().decode("utf-8")
+
+                    # Add newline to each record
+                    output_record = {
+                        'recordId': record['recordId'],
+                        'result': 'Ok',
+                        'data': base64.b64encode((payload + "\n").encode("utf-8"))
+                    }
+                    output.append(output_record)
+                print('Successfully processed {} records.'.format(len(event['records'])))
+                return {'records': output}
+      Runtime: python3.9
+      Timeout: '30'
+  
+###
+## Outputs
+Outputs:
+  Destination:
+    Description: Cloudwatch Logs Destination
+    Value: !GetAtt LogDestination.Arn
