@@ -1,0 +1,111 @@
+---
+Paremeters:
+  DestinationAccountId:
+    Type: String
+    Default: '01234567891011'
+
+Resources:
+  CustomEventBus: 
+    Type: AWS::Events::EventBus
+    Properties:
+      Name: 'custom_event_bus'
+
+  CustomEventsRule:
+    Type: AWS::Events::Rule
+    Properties:
+      EventBusName: !GetAtt CustomEventBus.Arn
+      EventPattern:
+        source:
+          - custom.source
+      State: ENABLED
+      Targets:
+        - Id: 'crossaccounttarget'
+          Arn: !Sub 'arn:aws:events:eu-west-1:${DestinationAccountId}:event-bus/default'
+          DeadLetterConfig:
+            Arn: !GetAtt DLQueue.Arn
+
+## DLQ
+  DLQueue:
+    Type: AWS::SQS::Queue
+
+  DLQueuePolicy: 
+    Type: AWS::SQS::QueuePolicy
+    Properties: 
+      Queues: 
+        - !Ref DLQueue
+      PolicyDocument: 
+        Statement: 
+          - Action: 
+              - 'SQS:SendMessage'
+            Effect: 'Allow'
+            Resource: '*'
+            Principal:  
+              Service: 'events.amazonaws.com'        
+
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Policies:
+        - PolicyName: cwlogspolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+            - Effect: Allow
+              Action:
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+              Resource: arn:aws:logs:*:*:*
+        - PolicyName: sqspolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+            - Effect: Allow
+              Action:
+              - sqs:ReceiveMessage
+              - sqs:DeleteMessage
+              - sqs:GetQueueAttributes
+              - sqs:ChangeMessageVisibility
+              Resource: !GetAtt DLQueue.Arn
+
+  LambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Description: Writes event from SQS to Cloudwatch Logs
+      Code:
+        ZipFile: !Sub |
+          import logging
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.DEBUG)
+
+          def lambda_handler(event, context):
+            logger.debug(event)
+
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Runtime: python3.9
+      Timeout: 5
+      MemorySize: 128
+
+  LambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${LambdaFunction}"
+      RetentionInDays: 7
+
+  LambdaFunctionEventSourceMapping:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      BatchSize: 10
+      Enabled: true
+      EventSourceArn: !GetAtt DLQueue.Arn
+      FunctionName: !GetAtt LambdaFunction.Arn
