@@ -1,5 +1,5 @@
 ---
-Paremeters:
+Parameters:
   DestinationAccountId:
     Type: String
     Default: '01234567891011'
