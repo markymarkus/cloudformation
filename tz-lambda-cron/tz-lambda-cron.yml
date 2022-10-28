@@ -1,0 +1,62 @@
+---
+###
+## Parameters
+Parameters:
+  CronStart:
+    Type: String
+    Description: Cron schedule
+    Default: 'cron(15 10 ? * MON-FRI *)'
+  CronTimezone:
+    Type: String
+    Description: Cron timezone
+    Default: 'Europe/Helsinki'
+  LambdaArn:
+    Type: String
+    Default: 'arn:aws:lambda:...'
+###
+## Resources
+Resources:
+  StartWindow:
+    Type: AWS::SSM::MaintenanceWindow
+    Properties: 
+      AllowUnassociatedTargets: true
+      Cutoff: 0
+      Duration: 1
+      Name: CronTrigger
+      Schedule: !Ref CronStart
+      ScheduleTimezone: !Ref CronTimezone
+
+  StartTask:
+    Type: AWS::SSM::MaintenanceWindowTask
+    Properties: 
+      Name: StartTask
+      Priority: 5
+      TaskArn: !Ref LambdaArn
+      WindowId: !Ref StartWindow
+      ServiceRoleArn: !GetAtt AutomationExecutionRole.Arn
+      TaskType: LAMBDA    # STEP_FUNCTIONS
+      TaskInvocationParameters:
+        MaintenanceWindowLambdaParameters:
+          Payload: !Base64 '{"message": "Hello World!"}'
+
+  AutomationExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ssm.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+      Policies:
+          - PolicyName: lambda
+            PolicyDocument:
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - lambda:InvokeFunction
+                  Resource:
+                    - !Ref LambdaArn
