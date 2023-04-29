@@ -1,0 +1,44 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Resources:
+  SSMInstanceRole:
+    Type : AWS::IAM::Role
+    Properties:
+      Path: /
+      Policies:
+        - PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Action:
+                  - s3:GetObject
+                Resource:
+                  - !Sub 'arn:aws:s3:::aws-ssm-${AWS::Region}/*'
+                  - !Sub 'arn:aws:s3:::aws-windows-downloads-${AWS::Region}/*'
+                  - !Sub 'arn:aws:s3:::amazon-ssm-${AWS::Region}/*'
+                  - !Sub 'arn:aws:s3:::amazon-ssm-packages-${AWS::Region}/*'
+                  - !Sub 'arn:aws:s3:::${AWS::Region}-birdwatcher-prod/*'
+                  - !Sub 'arn:aws:s3:::patch-baseline-snapshot-${AWS::Region}/*'
+                Effect: Allow
+          PolicyName: ssms3policy
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Principal:
+              Service:
+                - 'ec2.amazonaws.com'
+            Action: 'sts:AssumeRole'
+
+  SSMInstanceProfile:
+    Type: 'AWS::IAM::InstanceProfile'
+    Properties:
+      Roles:
+        - !Ref SSMInstanceRole
+
+Outputs:
+  InstanceProfile:
+    Value: !GetAtt SSMInstanceProfile.Arn
+  InstanceRole:
+    Value: !GetAtt SSMInstanceRole.Arn
