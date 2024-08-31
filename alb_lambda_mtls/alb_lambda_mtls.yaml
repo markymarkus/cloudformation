@@ -88,7 +88,11 @@ Resources:
         - IpProtocol: tcp
           FromPort: 80
           ToPort: 80
-          CidrIp: 84.249.26.117/32
+          CidrIp: !Ref MyIpAddress
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: !Ref MyIpAddress
   
   PermissionForALBToInvokeLambda:
     Type: AWS::Lambda::Permission
