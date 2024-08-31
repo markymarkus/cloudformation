@@ -1,0 +1,103 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: ALB with response Lambda function
+Parameters:
+  ALBSubnet1:
+    Type: String
+    Description: Subnet1 id, for ALB at least 2 subnets are needed
+  ALBSubnet2:
+    Type: String
+    Description: Subnet2 id, for ALB at least 2 subnets are needed
+  ALBVPC:
+    Type: String
+    Description: ALB VPC Id
+  MyIpAddress:
+    Type: String
+    Description: Ip address to allow access to ALB
+
+Resources:
+  LambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties: 
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Runtime: python3.11
+      Code:
+        ZipFile: |
+          def lambda_handler(event, context):
+              print(event)
+              return {
+                  'statusCode': 200,
+                  'body': 'Hello world!'
+              }
+  
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties: 
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: LambdaBasicExecution
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "*"
+
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties: 
+      TargetType: lambda
+      Targets:
+        - Id: !GetAtt LambdaFunction.Arn
+
+  ALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties: 
+      Scheme: internet-facing
+      Subnets: 
+        - !Ref ALBSubnet1
+        - !Ref ALBSubnet2
+      SecurityGroups: 
+        - !Ref ALBSecurityGroup
+
+  BasicListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties: 
+      DefaultActions: 
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+      LoadBalancerArn: !Ref ALB
+      Port: 80
+      Protocol: HTTP
+
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties: 
+      GroupDescription: Allow HTTP traffic
+      VpcId: !Ref ALBVPC
+      SecurityGroupIngress: 
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 84.249.26.117/32
+  
+  PermissionForALBToInvokeLambda:
+    Type: AWS::Lambda::Permission
+    Properties: 
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt LambdaFunction.Arn
+      Principal: elasticloadbalancing.amazonaws.com
+
+Outputs:
+  ALBURL:
+    Value: !GetAtt ALB.DNSName
+    Description: URL of the ALB
