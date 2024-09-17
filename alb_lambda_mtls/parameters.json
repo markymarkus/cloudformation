@@ -1,0 +1,11 @@
+{
+    "Parameters": {
+      "ALBSubnet1": "subnet-012345678899",
+      "ALBSubnet2": "subnet-987555432121",
+      "ALBVPC": "vpc-12345",
+      "CertificateArn": "arn:aws:acm:eu-west-1:XXXXXXXXXX:certificate/97cb742d-12345678910",
+      "MyIpAddress": "x.x.x.x/32",
+      "MTLSCABucket": "dev-trust-store-certs",
+      "MTLSCAKey": "client-ca-cert.pem"
+    }
+}
